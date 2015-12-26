@@ -1,0 +1,146 @@
+---
+title: "Machine Learning Project"
+author: "Bill Kayser"
+date: "December 24, 2015"
+output: html_document
+---
+
+```{r setup, echo=F, message=F, warning=F, error=F}
+library(caret)
+library(dplyr)
+```
+
+## Overview
+
+The goal of this project is to predict the manner in which exercises are being done given a set of 
+data collected from accelerometers during the exercise.
+
+Since the outcome is a class variable with five possible values a any type of linear model is not going to be suitable.  Instead I'll consider using Random Forest.
+
+First I'll reduce the number of features by eliminating features with substantial missing values and any
+features that have near zero variance.  
+
+I'm also going to ignore the timeseries component of the data, removing the timestamp and window variables from the set of features.
+
+In pre-processing I will standardize the remaining features, apply principle components analysis and use the resulting components that represent at least 95% of the variance.
+
+Finally I'll use cross validation with 10 folds on the complete set of training data to estimate the out of sample accuracy of the Random Forest model.
+
+## Load the data
+
+First load the data into a variable called `training`.  We're going to train using all the data and
+estimate the out of sample error using k-fold cross validation.
+
+```{r}
+training <- read.csv('./pml-training.csv', na.strings = c('','NA',"#DIV/0!"))
+```
+
+### Find the most useful features
+
+Examine the number of variables with missing data.
+
+```{r}
+missing_rowcount <- apply(training, MARGIN = 2, FUN=function(v) { sum(is.na(v)) })
+empty_vars <- which(missing_rowcount > 15000)
+```
+
+There are `r length(empty_vars)` variables with a high (>15000) number of missing values.
+
+Now create a new data with only features, eliminating variables with lots of missing data as well as some of the features which will not be used in prediction, like the user name, timestamp, index, etc.
+
+```{r}
+
+features <- select(training,
+                  -classe,
+                  -empty_vars,
+                  -starts_with('raw_timestamp'),
+                  -new_window,
+                  -num_window,
+                  -X, 
+                  -user_name, 
+                  -cvtd_timestamp)
+
+```
+
+Check that remaining features have adequate variance:
+
+```{r}
+nzv <- nearZeroVar(features)
+```
+
+No features found with near zero variance.
+
+```{r}
+length(nzv)
+```
+
+## Pre-processing
+
+Standardize the variables, then create principle components that amount to 95% of 
+variance.
+
+```{r}
+pp <- preProcess(features, method=c("center", "scale", "pca"), thresh=0.95)
+features_pp <- predict(pp, features)
+```
+
+``
+
+## Review Predictors
+
+Based on the PCA, let's visualize the predictors with the biggest influence on the first component by looking at the rotation coefficients.
+
+```{r}
+influencers <- order(abs(pp$rotation[,1]), decreasing=T)
+names(training)[influencers[1:2]]
+qplot(training[,influencers[1]], training[,influencers[2]], color=training$classe) +
+    xlab(names(training)[influencers[1]]) +
+    ylab(names(training)[influencers[2]])
+```
+
+Now lets look at the two biggest complete principle components for comparison:
+
+```{r, fig.width=7}
+qplot(features_pp[,1], features_pp[,2], color=training$classe) +
+    xlab('PC 1') + ylab('PC 2')
+```
+
+
+## Evaluate the Random Forest Model
+
+Random Forest seems like a good choice of methods since linear regression works poorly
+for classification.
+
+Set the seed for reproducibility.
+
+```{r}
+set.seed(1111)
+```
+
+Build a train control using cross validation and 10 folds. 
+
+```{r, eval=F}
+ctrl = trainControl(method='cv', 
+                    number=10,
+                    repeats=1)
+model <- train(features_pp, training$classe, control=ctrl, method="rf" )
+```
+
+```{r, echo=F, message=F}
+# We've already built the model.  It takes too long to run in the
+# report so I reloaded it.  
+# This creates 'training', and 'model'
+load('model.RData')
+```
+
+The estimate of accuracy and kappa for out of sample data is given by the model:
+
+```{r}
+model$results[, 1:3]
+```
+
+The best results come for mtry=2 and give an accuracy of `r sprintf('%2.2f',model$results[1,2] * 100.00)`%, or an out of sample error rate estimate of `r sprintf('%2.2f', (1-model$results[1,2])*100)`%.
+
+
+
+    

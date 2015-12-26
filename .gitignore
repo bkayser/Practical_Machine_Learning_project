@@ -11,3 +11,5 @@
 # produced vignettes
 vignettes/*.html
 vignettes/*.pdf
+project_cache
+.RData
